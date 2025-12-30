@@ -7,9 +7,6 @@ import Flashcard from './components/Flashcard';
 import ChatInterface from './components/ChatInterface';
 import Sidebar from './components/Sidebar';
 
-// Removed local AIStudio interface and declare global block to avoid conflicts with existing global definitions.
-// The environment already provides aistudio on the window object as a pre-configured global.
-
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>(AppState.IDLE);
   const [view, setView] = useState<'research' | 'pdf'>('research');
@@ -23,34 +20,9 @@ const App: React.FC = () => {
   const [showProtocol, setShowProtocol] = useState<boolean>(true);
   const [hasReappearedOnce, setHasReappearedOnce] = useState<boolean>(false);
   const [chatKey, setChatKey] = useState<number>(0);
-  const [isApiKeySelected, setIsApiKeySelected] = useState<boolean>(true);
 
   const t = useMemo(() => translations[lang], [lang]);
   const isRtl = lang === 'AR';
-
-  useEffect(() => {
-    // Check if an API key has already been selected using the pre-configured window.aistudio object.
-    const checkKey = async () => {
-      try {
-        if (window.aistudio) {
-          const hasKey = await window.aistudio.hasSelectedApiKey();
-          setIsApiKeySelected(hasKey);
-        } else if (!process.env.API_KEY) {
-          setIsApiKeySelected(false);
-        }
-      } catch (err) {
-        console.warn("API Key check environment check skipped.");
-      }
-    };
-    checkKey();
-  }, []);
-
-  const handleSelectKey = async () => {
-    if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      setIsApiKeySelected(true);
-    }
-  };
 
   useEffect(() => {
     if (state === AppState.ANALYZING && !showProtocol && !hasReappearedOnce) {
@@ -84,14 +56,7 @@ const App: React.FC = () => {
       } catch (err: any) {
         console.error("Initialization failed:", err);
         let errorMsg = lang === 'EN' ? 'Connection failed. ' : 'فشل الاتصال. ';
-        
-        // Handle API key errors by prompting the user to re-select a key.
-        if (err.message?.includes("Requested entity was not found")) {
-          setError(errorMsg + (lang === 'EN' ? 'Please re-select your API key.' : 'يرجى إعادة اختيار مفتاح API.'));
-          setIsApiKeySelected(false);
-        } else {
-          setError(errorMsg + (err.message || "The sanctuary link was unstable. Check your API key."));
-        }
+        setError(errorMsg + (err.message || "The sanctuary link was unstable. Check your network or API configuration."));
         setState(AppState.ERROR);
       }
     };
@@ -128,25 +93,6 @@ const App: React.FC = () => {
       </div>
     </div>
   );
-
-  if (!isApiKeySelected) {
-    return (
-      <div className="min-h-screen bg-[#05070a] flex items-center justify-center p-6 text-center">
-        <div className="glass-card p-12 rounded-[40px] max-w-md w-full space-y-8 animate-in zoom-in duration-500">
-          <div className="w-20 h-20 bg-indigo-600/20 rounded-3xl flex items-center justify-center mx-auto text-indigo-400">
-            <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
-          </div>
-          <div className="space-y-4">
-            <h2 className="text-3xl font-black text-white">API Key Required</h2>
-            <p className="text-slate-400 text-sm leading-relaxed">To access this research sanctuary, a paid Gemini API key must be selected. Check the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">billing documentation</a>.</p>
-          </div>
-          <button onClick={handleSelectKey} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl transition-all shadow-xl shadow-indigo-600/20 active:scale-95">
-            Select API Key
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className={`min-h-screen bg-[#05070a] text-slate-200 ${isRtl ? 'font-arabic' : 'font-sans'}`} dir={isRtl ? 'rtl' : 'ltr'}>
