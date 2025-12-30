@@ -19,11 +19,11 @@ async def serve_frontend(rest_of_path: str):
     # If the path is empty or just '/', serve index.html
     if not rest_of_path or rest_of_path == "/":
         return FileResponse(os.path.join(dist_path, "index.html"))
-    
+
     file_path = os.path.join(dist_path, rest_of_path)
     if os.path.isfile(file_path):
         return FileResponse(file_path)
-    
+
     # Fallback to index.html for SPA routing
     return FileResponse(os.path.join(dist_path, "index.html"))
 
