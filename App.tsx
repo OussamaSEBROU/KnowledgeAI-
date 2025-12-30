@@ -1,216 +1,120 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { gemini } from './geminiService';
-import { Axiom, AppState, PDFData, Language } from './types';
-import { translations } from './translations';
-import Flashcard from './components/Flashcard';
-import ChatInterface from './components/ChatInterface';
-import Sidebar from './components/Sidebar';
+import { GoogleGenAI, Type, GenerateContentResponse, Chat } from "@google/genai";
+import { Axiom, PDFData, Language } from "./types";
 
-const App: React.FC = () => {
-  const [state, setState] = useState<AppState>(AppState.IDLE);
-  const [view, setView] = useState<'research' | 'pdf'>('research');
-  const [axioms, setAxioms] = useState<Axiom[]>([]);
-  const [fileName, setFileName] = useState<string>('');
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string>('');
-  const [lang, setLang] = useState<Language>('EN');
-  const [modal, setModal] = useState<'about' | 'help' | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [showProtocol, setShowProtocol] = useState<boolean>(true);
-  const [hasReappearedOnce, setHasReappearedOnce] = useState<boolean>(false);
-  const [chatKey, setChatKey] = useState<number>(0);
+const SYSTEM_INSTRUCTION = `You are a World-Class Senior Research Architect and Intellectual Analyst. 
 
-  const t = useMemo(() => translations[lang], [lang]);
-  const isRtl = lang === 'AR';
+MANDATORY RESPONSE PROTOCOL:
+1. PRE-ANALYSIS: Before outputting any answer, you must internally deconstruct the provided document's structural philosophy and the author's specific delivery method.
+2. STYLISTIC MIRRORING: Your responses must mirror the linguistic complexity and professional context of the source file.
+3. STRICT GROUNDING: You are FORBIDDEN from providing information that exists outside the provided text. Every claim must be an axiomatic derivation of the uploaded content.
+4. THINKING PHASE: Analyze the author's tone—whether technical, poetic, or analytical—and maintain that specific context.
 
-  useEffect(() => {
-    if (state === AppState.ANALYZING && !showProtocol && !hasReappearedOnce) {
-      setShowProtocol(true);
-      setHasReappearedOnce(true);
+Your goal is to provide an intellectual brainstorming extension of the author's mind.`;
+
+// Using gemini-2.5-flash for high-performance, low-latency document deconstruction.
+const MODEL_NAME = 'gemini-2.5-flash';
+
+export class GeminiService {
+  private chatInstance: Chat | null = null;
+
+  constructor() {}
+
+  /**
+   * Initializes a new GoogleGenAI instance using the environment's API key directly.
+   */
+  private getAI() {
+    // API key is obtained exclusively from process.env.API_KEY
+    return new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  }
+
+  resetService() {
+    this.chatInstance = null;
+  }
+
+  async initializeSession(pdf: PDFData, lang: Language): Promise<Axiom[]> {
+    const ai = this.getAI();
+    
+    const prompt = `Perform a deep intellectual deconstruction of this document. Identify the 6 foundational conceptual pillars (Axioms). Provide a title and a sophisticated summary for each. Output strictly as a JSON array of objects with "axiom" and "definition" properties.`;
+    
+    try {
+      const response = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: 'application/pdf',
+                data: pdf.base64
+              }
+            }
+          ]
+        },
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                axiom: { type: Type.STRING },
+                definition: { type: Type.STRING }
+              },
+              required: ['axiom', 'definition']
+            }
+          }
+        }
+      });
+
+      const text = response.text;
+      if (!text) throw new Error("The sanctuary deconstruction returned an empty result.");
+      
+      // Robust JSON parsing to handle potential markdown wrappers
+      const cleanedJson = text.replace(/```json|```/gi, '').trim();
+      const axioms = JSON.parse(cleanedJson);
+
+      // Initialize persistent chat session
+      this.chatInstance = ai.chats.create({
+        model: MODEL_NAME,
+        config: {
+          systemInstruction: `${SYSTEM_INSTRUCTION} You are analyzing the document "${pdf.name}". Communicate strictly in ${lang === 'AR' ? 'Arabic' : 'English'}.`,
+        },
+        history: [
+          {
+            role: 'user',
+            parts: [
+              { text: "Synchronize with this document and prepare for deep inquiry." },
+              { inlineData: { mimeType: 'application/pdf', data: pdf.base64 } }
+            ]
+          },
+          {
+            role: 'model',
+            parts: [{ text: "Synchronization complete. Axiomatic core established. Stylistic mirroring active. Ready for inquiry." }]
+          }
+        ]
+      });
+
+      return axioms;
+    } catch (e: any) {
+      console.error("Gemini API Error:", e);
+      throw new Error(e.message || "Synchronization failed.");
     }
-  }, [state, showProtocol, hasReappearedOnce]);
+  }
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || file.type !== 'application/pdf') {
-      setError(lang === 'EN' ? 'Please upload a valid PDF.' : 'يرجى تحميل ملف PDF صالح.');
-      return;
+  async *sendMessageStream(text: string): AsyncGenerator<string> {
+    if (!this.chatInstance) throw new Error("Sanctuary Session Not Initialized");
+    
+    const stream = await this.chatInstance.sendMessageStream({ 
+      message: `[Intellectual Analysis Phase Activated] User Inquiry: ${text}.` 
+    });
+
+    for await (const chunk of stream) {
+      const c = chunk as GenerateContentResponse;
+      if (c.text) yield c.text;
     }
-    
-    setError('');
-    setState(AppState.UPLOADING);
-    setFileName(file.name);
-    
-    const url = URL.createObjectURL(file);
-    setPdfUrl(url);
-    
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64 = (reader.result as string).split(',')[1];
-      setState(AppState.ANALYZING);
-      try {
-        const result = await gemini.initializeSession({ base64, name: file.name }, lang);
-        setAxioms(result);
-        setState(AppState.READY);
-      } catch (err: any) {
-        console.error("Initialization failed:", err);
-        let errorMsg = lang === 'EN' ? 'Connection failed. ' : 'فشل الاتصال. ';
-        setError(errorMsg + (err.message || "The sanctuary link was unstable. Check your network or API configuration."));
-        setState(AppState.ERROR);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
+  }
+}
 
-  const handleReset = () => {
-    gemini.resetService();
-    setState(AppState.IDLE);
-    setAxioms([]);
-    setFileName('');
-    setError('');
-    setChatKey(p => p + 1);
-    setHasReappearedOnce(false);
-    setShowProtocol(true);
-    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-    setPdfUrl(null);
-  };
-
-  const ProtocolBanner = () => (
-    <div className="max-w-5xl mx-auto mb-10 animate-in slide-in-from-bottom-4 duration-700">
-      <div className="glass-card p-8 rounded-3xl border-indigo-500/20 flex gap-6 items-center bg-indigo-900/5 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/5 rounded-full blur-3xl -mr-16 -mt-16"></div>
-        <button onClick={() => setShowProtocol(false)} className={`absolute top-4 ${isRtl ? 'left-4' : 'right-4'} text-slate-500 hover:text-white transition-colors`}>
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-        </button>
-        <div className="p-4 bg-indigo-600/10 rounded-2xl text-indigo-400 border border-indigo-500/20 hidden sm:block">
-          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-        </div>
-        <div className="flex-1">
-          <h4 className="text-[10px] uppercase tracking-[0.2em] font-black text-indigo-400 mb-2">Sanctuary Protocol</h4>
-          <p className="text-sm md:text-base text-slate-300 font-serif leading-relaxed italic">{t.readingDisclaimer}</p>
-        </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className={`min-h-screen bg-[#05070a] text-slate-200 ${isRtl ? 'font-arabic' : 'font-sans'}`} dir={isRtl ? 'rtl' : 'ltr'}>
-      <Sidebar 
-        lang={lang} 
-        setLang={setLang} 
-        t={t} 
-        onShowModal={setModal} 
-        onNewSession={handleReset} 
-        currentView={view} 
-        setView={setView} 
-        disabled={state !== AppState.READY}
-        isCollapsed={sidebarCollapsed}
-        setIsCollapsed={setSidebarCollapsed}
-      />
-
-      <main className={`transition-all duration-500 ${sidebarCollapsed ? (isRtl ? 'pr-20' : 'pl-20') : (isRtl ? 'pr-64' : 'pl-64')} p-10 min-h-screen`}>
-        <div className="max-w-6xl mx-auto py-12">
-          {state === AppState.IDLE || state === AppState.ERROR ? (
-            <div className="text-center space-y-12 py-20 animate-in fade-in zoom-in duration-1000">
-              <div className="space-y-6">
-                <h1 className="text-7xl md:text-8xl font-black text-white tracking-tighter shine-brand">{t.title}</h1>
-                <p className="text-xl md:text-2xl text-slate-400 max-w-2xl mx-auto font-serif italic">{t.subtitle}</p>
-                <div className="flex flex-col items-center gap-2">
-                   <p className="text-[10px] text-indigo-500 font-black uppercase tracking-[0.4em]">{t.subtitle2}</p>
-                   <div className="h-px w-24 bg-indigo-500/30"></div>
-                </div>
-              </div>
-
-              <div className="max-w-xl mx-auto">
-                <label className="group relative block cursor-pointer">
-                  <input type="file" className="hidden" accept="application/pdf" onChange={handleFileUpload} />
-                  <div className="glass-card p-12 rounded-[48px] border-white/5 group-hover:border-indigo-500/30 transition-all duration-500 group-hover:scale-[1.02] bg-white/[0.01]">
-                    <div className="w-24 h-24 bg-indigo-600/10 rounded-3xl flex items-center justify-center mx-auto mb-8 text-indigo-500 group-hover:scale-110 transition-transform shadow-inner shadow-indigo-600/5">
-                      <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                    </div>
-                    <h3 className="text-3xl font-black text-white mb-2">{t.uploadTitle}</h3>
-                    <p className="text-slate-500 text-sm mb-10">{t.uploadSubtitle}</p>
-                    <div className="inline-block px-12 py-5 bg-indigo-600 rounded-2xl text-white font-black uppercase text-xs tracking-widest shadow-2xl shadow-indigo-600/40 hover:bg-indigo-500 transition-colors">
-                      {t.uploadBtn}
-                    </div>
-                  </div>
-                </label>
-                {error && <p className="mt-8 text-rose-500 text-sm font-bold animate-pulse bg-rose-500/5 py-3 px-6 rounded-xl border border-rose-500/20 inline-block">{error}</p>}
-              </div>
-              <p className="text-[10px] text-slate-600 font-bold uppercase tracking-[0.5em] mt-16">{t.creator}</p>
-            </div>
-          ) : state === AppState.ANALYZING || state === AppState.UPLOADING ? (
-            <div className="flex flex-col items-center justify-center py-40 space-y-12">
-              <div className="relative w-32 h-32">
-                <div className="absolute inset-0 border-4 border-indigo-500/10 rounded-full"></div>
-                <div className="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
-                <div className="absolute inset-4 border border-indigo-500/20 rounded-full animate-pulse"></div>
-              </div>
-              <div className="text-center space-y-4">
-                <h2 className="text-4xl font-black text-white tracking-tight">{state === AppState.UPLOADING ? t.transmitting : t.analyzing}</h2>
-                <p className="text-slate-500 font-serif italic text-lg">{fileName}</p>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-20 animate-in fade-in slide-in-from-bottom-8 duration-1000">
-              {showProtocol && <ProtocolBanner />}
-              
-              {view === 'research' ? (
-                <>
-                  <section className="space-y-12">
-                    <div className="flex items-end justify-between border-b border-white/5 pb-10">
-                      <div>
-                        <span className="text-[10px] text-indigo-500 font-black uppercase tracking-[0.5em] mb-4 block">{fileName}</span>
-                        <h2 className="text-5xl font-black text-white tracking-tight">{t.axiomTitle}</h2>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
-                      {axioms.map((ax, i) => (
-                        <Flashcard key={i} axiom={ax} index={i} t={t} />
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className="space-y-12">
-                    <div className="flex items-end justify-between border-b border-white/5 pb-10">
-                      <h2 className="text-5xl font-black text-white tracking-tight">{t.dialogueTitle}</h2>
-                    </div>
-                    <div className="max-w-5xl mx-auto">
-                      <ChatInterface key={chatKey} t={t} />
-                    </div>
-                  </section>
-                </>
-              ) : (
-                <div className="h-[calc(100vh-220px)] glass-card rounded-[48px] overflow-hidden border border-white/10 shadow-2xl">
-                  {pdfUrl ? (
-                    <iframe src={`${pdfUrl}#toolbar=0`} className="w-full h-full border-none" title="PDF Viewer" />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-slate-600 italic">Document link lost.</div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </main>
-
-      {/* Modals */}
-      {modal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md animate-in fade-in duration-300" onClick={() => setModal(null)}>
-          <div className="glass-card p-16 rounded-[60px] max-w-2xl w-full relative border-indigo-500/20" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setModal(null)} className="absolute top-10 right-10 text-slate-500 hover:text-white transition-colors">
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
-            <h2 className="text-5xl font-black text-white mb-10 tracking-tight">{modal === 'about' ? t.sidebarAbout : t.sidebarHelp}</h2>
-            <div className="prose prose-invert max-w-none text-xl text-slate-300 leading-relaxed font-serif italic">
-              {modal === 'about' ? t.aboutContent : t.helpContent}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default App;
+export const gemini = new GeminiService();
