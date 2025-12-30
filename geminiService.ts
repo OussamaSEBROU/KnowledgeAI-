@@ -12,7 +12,7 @@ MANDATORY RESPONSE PROTOCOL:
 
 Your goal is to provide an intellectual brainstorming extension of the author's mind.`;
 
-// Using gemini-3-pro-preview for complex reasoning and document deconstruction.
+// Using gemini-2.5-flash for high-performance, low-latency document deconstruction and sophisticated reasoning.
 const MODEL_NAME = 'gemini-2.5-flash';
 
 export class GeminiService {
@@ -20,11 +20,14 @@ export class GeminiService {
 
   constructor() {}
 
-  // Creates a new GoogleGenAI instance right before making an API call to ensure it uses the most up-to-date API key.
+  /**
+   * Initializes a new GoogleGenAI instance.
+   * Created right before making an API call to ensure it always uses the most up-to-date API key.
+   */
   private getAI() {
     const apiKey = process.env.API_KEY;
     if (!apiKey) {
-      throw new Error("API_KEY environment variable is missing. Please configure it in your deployment settings.");
+      throw new Error("API_KEY environment variable is missing. Please ensure your sanctuary is correctly configured.");
     }
     return new GoogleGenAI({ apiKey });
   }
@@ -36,7 +39,7 @@ export class GeminiService {
   async initializeSession(pdf: PDFData, lang: Language): Promise<Axiom[]> {
     const ai = this.getAI();
     
-    // First, extract the Axioms for the UI
+    // Step 1: Extract the foundational Axioms for the research interface
     const prompt = `Perform a deep intellectual deconstruction of this document. Identify the 6 foundational conceptual pillars (Axioms). Provide a title and a sophisticated summary for each. Output strictly as a JSON array of objects with "axiom" and "definition" properties.`;
     
     try {
@@ -61,8 +64,8 @@ export class GeminiService {
             items: {
               type: Type.OBJECT,
               properties: {
-                axiom: { type: Type.STRING },
-                definition: { type: Type.STRING }
+                axiom: { type: Type.STRING, description: "The title of the core principle or pillar." },
+                definition: { type: Type.STRING, description: "A sophisticated, grounded summary of the axiom." }
               },
               required: ['axiom', 'definition']
             }
@@ -70,37 +73,37 @@ export class GeminiService {
         }
       });
 
-      // Extract generated text from the response object's .text property.
+      // Directly accessing the .text property of the response
       const text = response.text;
-      if (!text) throw new Error("Empty response from model.");
+      if (!text) throw new Error("The sanctuary deconstruction returned an empty result.");
       
       const axioms = JSON.parse(text.trim());
 
-      // Initialize the Chat session with the PDF in the history for context persistence.
+      // Step 2: Initialize the persistent Chat session with the document embedded in history
       this.chatInstance = ai.chats.create({
         model: MODEL_NAME,
         config: {
-          systemInstruction: `${SYSTEM_INSTRUCTION} You are currently analyzing the document "${pdf.name}". You must communicate strictly in ${lang === 'AR' ? 'Arabic' : 'English'}.`,
+          systemInstruction: `${SYSTEM_INSTRUCTION} You are analyzing the document "${pdf.name}". You must communicate strictly in ${lang === 'AR' ? 'Arabic' : 'English'}.`,
         },
         history: [
           {
             role: 'user',
             parts: [
-              { text: "This is the research document. Analyze its logic deeply." },
+              { text: "This is the research document. Synchronize with its logic and prepare for deep inquiry." },
               { inlineData: { mimeType: 'application/pdf', data: pdf.base64 } }
             ]
           },
           {
             role: 'model',
-            parts: [{ text: "The sanctuary is synchronized. I have ingested the document and extracted its axiomatic core. I am ready for your inquiry." }]
+            parts: [{ text: "The sanctuary is synchronized. I have ingested the document's axiomatic core and established stylistic mirroring. I am ready to facilitate your investigation." }]
           }
         ]
       });
 
       return axioms;
     } catch (e: any) {
-      console.error("Gemini API Error:", e);
-      throw new Error(e.message || "Connection failed.");
+      console.error("Gemini API Error during synchronization:", e);
+      throw new Error(e.message || "The sanctuary link was unstable. Check your API key and file size.");
     }
   }
 
@@ -108,12 +111,12 @@ export class GeminiService {
     if (!this.chatInstance) throw new Error("Sanctuary Session Not Initialized");
     
     const stream = await this.chatInstance.sendMessageStream({ 
-      message: `[Intellectual Analysis Phase Required] User Inquiry: ${text}.` 
+      message: `[Analytical Phase Activated] User Inquiry: ${text}.` 
     });
 
     for await (const chunk of stream) {
       const c = chunk as GenerateContentResponse;
-      // Extract generated text from the stream chunk's .text property.
+      // Extract generated text from the stream chunk directly via the .text property
       if (c.text) yield c.text;
     }
   }
