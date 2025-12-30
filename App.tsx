@@ -7,6 +7,19 @@ import Flashcard from './components/Flashcard';
 import ChatInterface from './components/ChatInterface';
 import Sidebar from './components/Sidebar';
 
+// Define the AIStudio interface to match the environment's expected type
+interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
+// Extended global window for AI Studio integration with correct type naming
+declare global {
+  interface Window {
+    aistudio: AIStudio;
+  }
+}
+
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>(AppState.IDLE);
   const [view, setView] = useState<'research' | 'pdf'>('research');
@@ -20,9 +33,34 @@ const App: React.FC = () => {
   const [showProtocol, setShowProtocol] = useState<boolean>(true);
   const [hasReappearedOnce, setHasReappearedOnce] = useState<boolean>(false);
   const [chatKey, setChatKey] = useState<number>(0);
+  const [isApiKeySelected, setIsApiKeySelected] = useState<boolean>(true);
 
   const t = useMemo(() => translations[lang], [lang]);
   const isRtl = lang === 'AR';
+
+  // Verify API Key availability on mount
+  useEffect(() => {
+    const checkKey = async () => {
+      try {
+        if (window.aistudio) {
+          const hasKey = await window.aistudio.hasSelectedApiKey();
+          setIsApiKeySelected(hasKey);
+        } else if (!process.env.API_KEY) {
+          setIsApiKeySelected(false);
+        }
+      } catch (err) {
+        console.warn("API Key check skipped - likely non-studio environment.");
+      }
+    };
+    checkKey();
+  }, []);
+
+  const handleSelectKey = async () => {
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
+      setIsApiKeySelected(true); // Proceed immediately as per instructions
+    }
+  };
 
   useEffect(() => {
     if (state === AppState.ANALYZING && !showProtocol && !hasReappearedOnce) {
@@ -37,6 +75,8 @@ const App: React.FC = () => {
       setError(lang === 'EN' ? 'Please upload a PDF.' : 'يرجى تحميل ملف PDF.');
       return;
     }
+    
+    setError('');
     setState(AppState.UPLOADING);
     setFileName(file.name);
     const url = URL.createObjectURL(file);
@@ -49,8 +89,16 @@ const App: React.FC = () => {
         const result = await gemini.initializeSession({ base64, name: file.name }, lang);
         setAxioms(result);
         setState(AppState.READY);
-      } catch (err) {
-        setError(lang === 'EN' ? 'Connection failed.' : 'فشل الاتصال.');
+      } catch (err: any) {
+        console.error("Initialization failed:", err);
+        let errorMsg = lang === 'EN' ? 'Connection failed. ' : 'فشل الاتصال. ';
+        
+        if (err.message?.includes("Requested entity was not found")) {
+          setError(errorMsg + (lang === 'EN' ? 'Please re-select your API key.' : 'يرجى إعادة اختيار مفتاح API.'));
+          setIsApiKeySelected(false);
+        } else {
+          setError(errorMsg + (err.message || "Unknown error. Check console and API key."));
+        }
         setState(AppState.ERROR);
       }
     };
@@ -62,6 +110,7 @@ const App: React.FC = () => {
     setState(AppState.IDLE);
     setAxioms([]);
     setFileName('');
+    setError('');
     setChatKey(p => p + 1);
     setHasReappearedOnce(false);
     setShowProtocol(true);
@@ -73,61 +122,140 @@ const App: React.FC = () => {
         <button onClick={() => setShowProtocol(false)} className={`absolute top-4 ${isRtl ? 'left-4' : 'right-4'} text-slate-500 hover:text-white`}>
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
         </button>
-        <div className="p-4 bg-indigo-600/10 rounded-2xl text-indigo-400 border border-indigo-500/20 hidden sm:block">
-          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5S19.832 5.477 21 6.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+        <div className="p-4 bg-indigo-600/10 rounded-2xl text-indigo-400 border-indigo-500/20">
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
         </div>
-        <div className={`flex-1 ${isRtl ? 'pl-8' : 'pr-8'}`}>
-          <h4 className="text-[10px] uppercase tracking-[0.2em] font-black text-indigo-400 mb-2">Protocol: Critical Engagement</h4>
-          <p className="text-sm md:text-base text-slate-400 leading-relaxed font-medium">{t.readingDisclaimer}</p>
+        <div className="flex-1">
+          <p className="text-sm text-slate-300 font-serif leading-relaxed italic">{t.readingDisclaimer}</p>
         </div>
       </div>
     </div>
   );
 
-  const dynamicSpacing = sidebarCollapsed ? (isRtl ? 'pr-20' : 'pl-20') : (isRtl ? 'pr-64' : 'pl-64');
+  if (!isApiKeySelected) {
+    return (
+      <div className="min-h-screen bg-[#05070a] flex items-center justify-center p-6 text-center">
+        <div className="glass-card p-12 rounded-[40px] max-w-md w-full space-y-8">
+          <div className="w-20 h-20 bg-indigo-600/20 rounded-3xl flex items-center justify-center mx-auto text-indigo-400">
+            <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+          </div>
+          <div className="space-y-4">
+            <h2 className="text-3xl font-black text-white">API Key Required</h2>
+            <p className="text-slate-400 text-sm leading-relaxed">To access this high-performance research sanctuary, a paid API key must be selected. Please refer to the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">billing documentation</a> for more information.</p>
+          </div>
+          <button onClick={handleSelectKey} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl transition-all shadow-xl shadow-indigo-600/20">
+            Select API Key
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-[#050810]" dir={isRtl ? 'rtl' : 'ltr'}>
-      <Sidebar lang={lang} setLang={setLang} t={t} onShowModal={setModal} onNewSession={handleReset} currentView={view} setView={setView} disabled={state !== AppState.READY} isCollapsed={sidebarCollapsed} setIsCollapsed={setSidebarCollapsed} />
-      <main className={`transition-all duration-500 ${dynamicSpacing} flex flex-col pt-24`}>
-        <div className="container mx-auto px-6 max-w-7xl">
-          <header className="text-center mb-24">
-            <h1 className="text-6xl md:text-8xl font-black mb-6 tracking-tighter shine-brand uppercase">KNOWLEDGE AI</h1>
-            <p className="text-slate-500 text-xl font-serif italic opacity-70">"{t.subtitle}"</p>
-          </header>
+    <div className={`min-h-screen bg-[#05070a] text-slate-200 ${isRtl ? 'font-arabic' : 'font-sans'}`} dir={isRtl ? 'rtl' : 'ltr'}>
+      <Sidebar 
+        lang={lang} 
+        setLang={setLang} 
+        t={t} 
+        onShowModal={setModal} 
+        onNewSession={handleReset} 
+        currentView={view} 
+        setView={setView} 
+        disabled={state !== AppState.READY}
+        isCollapsed={sidebarCollapsed}
+        setIsCollapsed={setSidebarCollapsed}
+      />
 
+      <main className={`transition-all duration-500 ${sidebarCollapsed ? (isRtl ? 'pr-20' : 'pl-20') : (isRtl ? 'pr-64' : 'pl-64')} p-10 min-h-screen`}>
+        <div className="max-w-6xl mx-auto py-12">
           {state === AppState.IDLE || state === AppState.ERROR ? (
-            <div className="space-y-12">
-              <div className="max-w-3xl mx-auto glass-card p-20 rounded-[40px] flex flex-col items-center">
-                <label className="cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white px-12 py-5 rounded-2xl font-bold uppercase text-xs">
-                  {t.uploadBtn}
+            <div className="text-center space-y-12 py-20 animate-in fade-in zoom-in duration-1000">
+              <div className="space-y-6">
+                <h1 className="text-7xl font-black text-white tracking-tighter">{t.title}</h1>
+                <p className="text-xl text-slate-400 max-w-2xl mx-auto font-serif italic">{t.subtitle}</p>
+                <p className="text-xs text-indigo-500/60 font-black uppercase tracking-[0.3em]">{t.subtitle2}</p>
+              </div>
+
+              <div className="max-w-xl mx-auto">
+                <label className="group relative block cursor-pointer">
                   <input type="file" className="hidden" accept="application/pdf" onChange={handleFileUpload} />
+                  <div className="glass-card p-12 rounded-[48px] border-white/5 group-hover:border-indigo-500/30 transition-all duration-500 group-hover:scale-[1.02] bg-white/[0.02]">
+                    <div className="w-20 h-20 bg-indigo-600/10 rounded-3xl flex items-center justify-center mx-auto mb-8 text-indigo-500 group-hover:scale-110 transition-transform">
+                      <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                    </div>
+                    <h3 className="text-2xl font-black text-white mb-2">{t.uploadTitle}</h3>
+                    <p className="text-slate-500 text-sm mb-8">{t.uploadSubtitle}</p>
+                    <div className="inline-block px-10 py-4 bg-indigo-600 rounded-2xl text-white font-bold text-sm shadow-xl shadow-indigo-600/20">
+                      {t.uploadBtn}
+                    </div>
+                  </div>
                 </label>
-                {error && <p className="mt-4 text-red-400">{error}</p>}
+                {error && <p className="mt-6 text-rose-500 text-sm font-medium animate-pulse">{error}</p>}
               </div>
-              {showProtocol && <ProtocolBanner />}
+              <p className="text-[10px] text-slate-600 font-bold uppercase tracking-[0.5em] mt-12">{t.creator}</p>
             </div>
-          ) : state === AppState.UPLOADING || state === AppState.ANALYZING ? (
-            <div className="space-y-12">
-              <div className="max-w-md mx-auto text-center py-32">
-                <div className="w-32 h-32 border-[6px] border-indigo-500/10 border-t-indigo-500 rounded-full animate-spin mx-auto mb-8"></div>
-                <h3 className="text-3xl text-white">{state === AppState.UPLOADING ? t.transmitting : t.analyzing}</h3>
+          ) : state === AppState.ANALYZING || state === AppState.UPLOADING ? (
+            <div className="flex flex-col items-center justify-center py-40 space-y-12">
+              <div className="relative w-24 h-24">
+                <div className="absolute inset-0 border-4 border-indigo-500/20 rounded-full"></div>
+                <div className="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
               </div>
-              {showProtocol && <ProtocolBanner />}
+              <div className="text-center space-y-4">
+                <h2 className="text-3xl font-black text-white">{state === AppState.UPLOADING ? t.transmitting : t.analyzing}</h2>
+                <p className="text-slate-500 font-serif italic">{fileName}</p>
+              </div>
             </div>
           ) : (
-            <div className="space-y-20 pb-32">
+            <div className="space-y-16 animate-in fade-in slide-in-from-bottom-8 duration-1000">
               {showProtocol && <ProtocolBanner />}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                {axioms.map((a, i) => <Flashcard key={i} axiom={a} index={i} t={t} />)}
-              </div>
-              <div className="max-w-5xl mx-auto">
-                <ChatInterface key={chatKey} t={t} />
-              </div>
+              
+              {view === 'research' ? (
+                <>
+                  <section className="space-y-10">
+                    <div className="flex items-end justify-between border-b border-white/5 pb-8">
+                      <div>
+                        <span className="text-[10px] text-indigo-500 font-black uppercase tracking-[0.4em] mb-4 block">{fileName}</span>
+                        <h2 className="text-4xl font-black text-white tracking-tight">{t.axiomTitle}</h2>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                      {axioms.map((ax, i) => (
+                        <Flashcard key={i} axiom={ax} index={i} t={t} />
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="space-y-10">
+                    <div className="flex items-end justify-between border-b border-white/5 pb-8">
+                      <h2 className="text-4xl font-black text-white tracking-tight">{t.dialogueTitle}</h2>
+                    </div>
+                    <ChatInterface key={chatKey} t={t} />
+                  </section>
+                </>
+              ) : (
+                <div className="h-[calc(100vh-200px)] glass-card rounded-[40px] overflow-hidden">
+                  <iframe src={pdfUrl || ''} className="w-full h-full border-none" title="PDF Viewer" />
+                </div>
+              )}
             </div>
           )}
         </div>
       </main>
+
+      {/* Modals */}
+      {modal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setModal(null)}>
+          <div className="glass-card p-12 rounded-[48px] max-w-2xl w-full relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setModal(null)} className="absolute top-8 right-8 text-slate-500 hover:text-white">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+            <h2 className="text-4xl font-black text-white mb-8">{modal === 'about' ? t.sidebarAbout : t.sidebarHelp}</h2>
+            <div className="prose prose-invert max-w-none text-lg text-slate-300 leading-relaxed font-serif italic">
+              {modal === 'about' ? t.aboutContent : t.helpContent}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
