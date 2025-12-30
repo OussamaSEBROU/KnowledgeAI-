@@ -12,16 +12,16 @@ MANDATORY RESPONSE PROTOCOL:
 
 Your goal is to provide an intellectual brainstorming extension of the author's mind.`;
 
-// Using gemini-3-flash-preview for high performance and better availability in most regions
-const MODEL_NAME = 'gemini-3-flash-preview';
+// Using gemini-3-pro-preview for complex reasoning and document deconstruction.
+const MODEL_NAME = 'gemini-2.5-flash';
 
 export class GeminiService {
   private chatInstance: Chat | null = null;
 
   constructor() {}
 
+  // Creates a new GoogleGenAI instance right before making an API call to ensure it uses the most up-to-date API key.
   private getAI() {
-    // Note: process.env.API_KEY must be configured in your environment (e.g., Render dashboard)
     const apiKey = process.env.API_KEY;
     if (!apiKey) {
       throw new Error("API_KEY environment variable is missing. Please configure it in your deployment settings.");
@@ -36,16 +36,8 @@ export class GeminiService {
   async initializeSession(pdf: PDFData, lang: Language): Promise<Axiom[]> {
     const ai = this.getAI();
     
-    // Initialize the chat for future interactions
-    this.chatInstance = ai.chats.create({
-      model: MODEL_NAME,
-      config: {
-        systemInstruction: `${SYSTEM_INSTRUCTION} You must communicate strictly in ${lang === 'AR' ? 'Arabic' : 'English'}.`,
-        thinkingConfig: { thinkingBudget: 0 } // Flash-preview handles fast deconstruction well without explicit budget
-      },
-    });
-
-    const prompt = `Perform a deep intellectual deconstruction of this document. Identify the 6 foundational conceptual pillars (Axioms). Provide a title and a sophisticated summary for each. Output strictly as a JSON array of objects with "axiom" and "definition" properties. Do not include any markdown formatting like \`\`\`json.`;
+    // First, extract the Axioms for the UI
+    const prompt = `Perform a deep intellectual deconstruction of this document. Identify the 6 foundational conceptual pillars (Axioms). Provide a title and a sophisticated summary for each. Output strictly as a JSON array of objects with "axiom" and "definition" properties.`;
     
     try {
       const response = await ai.models.generateContent({
@@ -78,15 +70,37 @@ export class GeminiService {
         }
       });
 
+      // Extract generated text from the response object's .text property.
       const text = response.text;
-      if (!text) throw new Error("Empty response from model. The PDF might be too large or the API key restricted.");
+      if (!text) throw new Error("Empty response from model.");
       
-      // Attempting to clean potential markdown if the model ignores the instruction
-      const cleanedJson = text.replace(/```json|```/gi, '').trim();
-      return JSON.parse(cleanedJson);
+      const axioms = JSON.parse(text.trim());
+
+      // Initialize the Chat session with the PDF in the history for context persistence.
+      this.chatInstance = ai.chats.create({
+        model: MODEL_NAME,
+        config: {
+          systemInstruction: `${SYSTEM_INSTRUCTION} You are currently analyzing the document "${pdf.name}". You must communicate strictly in ${lang === 'AR' ? 'Arabic' : 'English'}.`,
+        },
+        history: [
+          {
+            role: 'user',
+            parts: [
+              { text: "This is the research document. Analyze its logic deeply." },
+              { inlineData: { mimeType: 'application/pdf', data: pdf.base64 } }
+            ]
+          },
+          {
+            role: 'model',
+            parts: [{ text: "The sanctuary is synchronized. I have ingested the document and extracted its axiomatic core. I am ready for your inquiry." }]
+          }
+        ]
+      });
+
+      return axioms;
     } catch (e: any) {
-      console.error("Gemini API Error details:", e);
-      throw new Error(e.message || "Failed to communicate with Gemini API. Check your API key permissions.");
+      console.error("Gemini API Error:", e);
+      throw new Error(e.message || "Connection failed.");
     }
   }
 
@@ -99,6 +113,7 @@ export class GeminiService {
 
     for await (const chunk of stream) {
       const c = chunk as GenerateContentResponse;
+      // Extract generated text from the stream chunk's .text property.
       if (c.text) yield c.text;
     }
   }
