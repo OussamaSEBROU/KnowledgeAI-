@@ -2,15 +2,22 @@
 import { GoogleGenAI, Type, GenerateContentResponse, Chat } from "@google/genai";
 import { Axiom, PDFData, Language } from "./types";
 
-const SYSTEM_INSTRUCTION = `You are an Elite Intellectual Researcher. Before answering any query about the uploaded PDF, you must:
-1. Analyze the author's philosophical/scientific school of thought.
-2. Determine the book's specific context (Historical, Technical, or Literary).
-3. Synthesize answers that align with the author's depth, maintaining a high cultural and intellectual tone.
-4. Analyze the linguistic, grammatical, and rhetorical style used by the author and mirror it in your response.
-5. All answers must derive STRICTLY from the file content and stay within the author's context.
+/**
+ * ELITE INTELLECTUAL PROTOCOL:
+ * 1. Analysis of the book's scope and context.
+ * 2. Decomposition of linguistic, grammatical, and rhetorical styles.
+ * 3. Strict mirroring of the author's intellectual framework.
+ * 4. Zero tolerance for information outside the source text.
+ */
+const SYSTEM_INSTRUCTION = `You are a World-Class Senior Research Architect and Intellectual Analyst. 
 
-Your tone is sophisticated, academic, and deeply analytical.
-MANDATORY: You must perform a comprehensive internal analysis of the document's structure and tone before outputting any results.`;
+MANDATORY RESPONSE PROTOCOL:
+1. PRE-ANALYSIS: Before outputting any answer, you must internally deconstruct the provided document's structural philosophy, the author's specific delivery method, and the specialized linguistic/grammatical syntax of the text.
+2. STYLISTIC MIRRORING: Your responses must mirror the linguistic complexity, rhetorical style, and professional context of the source file. If the file is a legal document, respond with legal precision; if it is a philosophical treatise, respond with dialectical depth.
+3. STRICT GROUNDING: You are FORBIDDEN from providing information that exists outside the provided text. Every claim must be an axiomatic derivation of the uploaded content.
+4. THINKING PHASE: You must analyze the nuances of the author's tone—whether it is technical, poetic, or analytical—and maintain that specific context in your delivery.
+
+Your goal is not just to summarize, but to provide an intellectual brainstorming extension of the author's own mind.`;
 
 const MODEL_NAME = 'gemini-2.5-flash';
 
@@ -30,23 +37,35 @@ export class GeminiService {
 
   async initializeSession(pdf: PDFData, lang: Language): Promise<Axiom[]> {
     this.currentPdf = pdf;
+    // Create a new instance with the latest API key from env
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
     
     this.chatInstance = ai.chats.create({
       model: MODEL_NAME,
       config: {
-        systemInstruction: `${SYSTEM_INSTRUCTION} Please respond primarily in ${lang === 'AR' ? 'Arabic' : 'English'}.`,
+        systemInstruction: `${SYSTEM_INSTRUCTION} You must communicate strictly in ${lang === 'AR' ? 'Arabic' : 'English'}.`,
       },
     });
 
-    const prompt = `Deconstruct this document and identify the 6 most foundational chapters or conceptual pillars. For each, provide a profound 'Axiom' title and a scholarly 'Definition' summary strictly grounded in the text.`;
+    const prompt = `Perform a deep intellectual deconstruction of this document. 
+    Identify the 6 foundational conceptual pillars (Axioms). 
+    For each pillar, provide:
+    1. A Title (The Axiom).
+    2. A Sophisticated Summary (The Definition) that mirrors the author's linguistic and rhetorical style.
+    
+    Strictly follow the author's specialty and terminology.`;
     
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: {
         parts: [
           { text: prompt },
-          { inlineData: { mimeType: 'application/pdf', data: pdf.base64 } }
+          {
+            inlineData: {
+              mimeType: 'application/pdf',
+              data: pdf.base64
+            }
+          }
         ]
       },
       config: {
@@ -57,8 +76,8 @@ export class GeminiService {
           items: {
             type: Type.OBJECT,
             properties: {
-              axiom: { type: Type.STRING },
-              definition: { type: Type.STRING }
+              axiom: { type: Type.STRING, description: "The conceptual title derived from the text." },
+              definition: { type: Type.STRING, description: "A summary mirroring the author's style and linguistic nuances." }
             },
             required: ['axiom', 'definition']
           }
@@ -67,17 +86,23 @@ export class GeminiService {
     });
 
     try {
-      return JSON.parse(response.text || '[]');
+      const data = JSON.parse(response.text || '[]');
+      return data;
     } catch (e) {
-      console.error("Parse failed", e);
-      return [];
+      console.error("Critical Deconstruction Failed:", e);
+      throw new Error("Failed to deconstruct the intellectual framework of the file.");
     }
   }
 
   async *sendMessageStream(text: string): AsyncGenerator<string> {
-    if (!this.chatInstance) throw new Error("Session not ready");
-    const responseStream = await this.chatInstance.sendMessageStream({ message: text });
-    for await (const chunk of responseStream) {
+    if (!this.chatInstance) throw new Error("Sanctuary Session Not Initialized");
+    
+    const stream = await this.chatInstance.sendMessageStream({ 
+      message: `[Intellectual Analysis Phase Required] User Inquiry: ${text}. 
+      Ensure the response mirrors the author's rhetorical style and stays strictly within text boundaries.` 
+    });
+
+    for await (const chunk of stream) {
       const c = chunk as GenerateContentResponse;
       if (c.text) yield c.text;
     }
